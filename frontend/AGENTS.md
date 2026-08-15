@@ -1,10 +1,9 @@
-<!-- LOVABLE:BEGIN -->
-> [!IMPORTANT]
-> This project is connected to [Lovable](https://lovable.dev). Avoid rewriting
-> published git history — force pushing, or rebasing/amending/squashing commits
-> that are already pushed — as it rewrites history on Lovable's side and the
-> user will likely lose their project history.
->
-> Commits you push to the connected branch sync back to Lovable and show up in
-> the editor, so keep the branch in a working state.
-<!-- LOVABLE:END -->
+# Project Agents Guide
+
+This is a TanStack Start + React + TypeScript frontend styled with Tailwind CSS.
+
+- Vite config lives in `vite.config.ts` and uses `@tanstack/react-start/plugin/vite`
+  directly (no external build wrapper).
+- Routes live under `src/routes` and are generated into `src/routeTree.gen.ts`.
+- The dev server proxies `/api/*` to the FastAPI backend at `http://localhost:8000`.
+- Commands: `npm run dev`, `npm run build`, `npm run lint`, `npm run format`.
