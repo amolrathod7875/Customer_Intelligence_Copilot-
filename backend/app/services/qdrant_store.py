@@ -4,13 +4,11 @@ import json
 import uuid
 from hashlib import sha256
 
-import requests
 from qdrant_client import QdrantClient, models
 
 from app.core.config import Settings
 from app.models.schemas import CustomerRecord
-from app.services.corpus_sync import HashingStore
-from app.services.vector_store import VectorStore
+from app.services.corpus_sync import HashingStore, VectorStore
 
 
 def _chunk_point_id(record_id: str, chunk_index: int) -> str:
@@ -22,11 +20,13 @@ def _manifest_point_id(record_id: str) -> str:
 
 
 class QdrantVectorStore:
-    """Qdrant store with chunking, hybrid (dense+sparse) search and rerank.
+    """Qdrant store with chunking, hybrid (dense+sparse) retrieval and
+    server-side late-interaction (ColBERT) reranking.
 
-    Embeddings (dense + sparse BM25) are computed server-side by Qdrant Cloud
-    Inference, and reranking is done via the Jina API - so the Render backend
-    only makes HTTP calls and stays lightweight.
+    All embeddings (dense, sparse BM25, late-interaction multi-vector) are
+    computed by Qdrant Cloud Inference, so the Render backend only issues HTTP
+    calls and stays lightweight. Retrieval runs a dense+sparse prefetch and lets
+    Qdrant rerank the candidates with the ColBERT multi-vector (MaxSim).
     """
 
     def __init__(self, settings: Settings) -> None:
@@ -43,27 +43,66 @@ class QdrantVectorStore:
     def _ensure_collections(self) -> None:
         chunks = self._settings.qdrant_collection
         manifest = self._settings.qdrant_manifest_collection
-        if not self._client.collection_exists(chunks):
-            self._ensure_chunk_collection(chunks)
-        if not self._client.collection_exists(manifest):
-            self._client.create_collection(
-                collection_name=manifest,
-                vectors_config={
-                    "ignored": models.VectorParams(size=1, distance=models.Distance.COSINE)
-                },
-            )
 
-    def _ensure_chunk_collection(self, name: str) -> None:
+        # Recreate if the chunk collection is missing or predates the
+        # late-interaction ("multi") vector, so a full re-ingest adds it.
+        recreate = True
+        if self._client.collection_exists(chunks):
+            info = self._client.get_collection(chunks)
+            vectors = info.config.params.vectors
+            has_multi = isinstance(vectors, dict) and "multi" in vectors
+            recreate = not has_multi
+
+        if recreate:
+            if self._client.collection_exists(chunks):
+                self._client.delete_collection(chunks)
+            if self._client.collection_exists(manifest):
+                self._client.delete_collection(manifest)
+            self._create_chunk_collection(chunks)
+            self._create_manifest_collection(manifest)
+
+        # Needed so CorpusSync can delete by record_id (filtered delete).
+        self._ensure_record_id_index(chunks)
+        self._ensure_record_id_index(manifest)
+
+    def _ensure_record_id_index(self, name: str) -> None:
+        if not self._client.collection_exists(name):
+            return
+        try:
+            self._client.create_payload_index(
+                name, "record_id", models.PayloadSchemaType.KEYWORD
+            )
+        except Exception:
+            # Already indexed or transient; non-fatal.
+            pass
+
+    def _create_chunk_collection(self, name: str) -> None:
         self._client.create_collection(
             collection_name=name,
             vectors_config={
                 "dense": models.VectorParams(
                     size=self._settings.qdrant_dim,
                     distance=models.Distance.COSINE,
-                )
+                ),
+                "multi": models.VectorParams(
+                    size=self._settings.qdrant_multi_dim,
+                    distance=models.Distance.COSINE,
+                    multivector_config=models.MultiVectorConfig(
+                        comparator=models.MultiVectorComparator.MAX_SIM
+                    ),
+                    hnsw_config=models.HnswConfigDiff(m=0),  # rerank-only: skip ANN index
+                ),
             },
             sparse_vectors_config={
                 "sparse": models.SparseVectorParams(modifier=models.Modifier.IDF)
+            },
+        )
+
+    def _create_manifest_collection(self, name: str) -> None:
+        self._client.create_collection(
+            collection_name=name,
+            vectors_config={
+                "ignored": models.VectorParams(size=1, distance=models.Distance.COSINE)
             },
         )
 
@@ -95,6 +134,9 @@ class QdrantVectorStore:
                     "sparse": models.Document(
                         text=chunk, model=self._settings.qdrant_sparse_model
                     ),
+                    "multi": models.Document(
+                        text=chunk, model=self._settings.qdrant_late_interaction_model
+                    ),
                 },
                 payload={
                     "record_id": record.id,
@@ -112,7 +154,6 @@ class QdrantVectorStore:
                 collection_name=self._settings.qdrant_collection, points=points
             )
 
-        # manifest keeps the full record so CorpusSync can diff incrementally
         self._client.upsert(
             collection_name=self._settings.qdrant_manifest_collection,
             points=[
@@ -170,7 +211,7 @@ class QdrantVectorStore:
             prefetch=[
                 models.Prefetch(
                     query=models.Document(
-                        text=question, model=self._keyword_dense_model()
+                        text=question, model=self._settings.qdrant_dense_model
                     ),
                     using="dense",
                     limit=self._settings.retrieve_limit,
@@ -183,17 +224,19 @@ class QdrantVectorStore:
                     limit=self._settings.retrieve_limit,
                 ),
             ],
-            query=models.FusionQuery(fusion=models.Fusion.RRF),
+            query=models.Document(
+                text=question, model=self._settings.qdrant_late_interaction_model
+            ),
+            using="multi",
             with_payload=True,
-            limit=self._settings.retrieve_limit,
+            limit=limit,
         )
 
-        payloads = [p.payload for p in response.points if p.payload]
-        if self._settings.reranker == "jina" and self._settings.jina_api_key and payloads:
-            payloads = self._rerank_jina(question, payloads)
-
         records: list[CustomerRecord] = []
-        for payload in payloads[:limit]:
+        for point in response.points:
+            payload = point.payload
+            if not payload:
+                continue
             records.append(
                 CustomerRecord(
                     id=f"{payload['record_id']}:{payload['chunk_index']}",
@@ -204,27 +247,3 @@ class QdrantVectorStore:
                 )
             )
         return records
-
-    def _keyword_dense_model(self) -> str:
-        return self._settings.qdrant_dense_model
-
-    def _rerank_jina(self, question: str, payloads: list[dict]) -> list[dict]:
-        resp = requests.post(
-            "https://api.jina.ai/v1/rerank",
-            headers={"Authorization": f"Bearer {self._settings.jina_api_key}"},
-            json={
-                "model": "jina-reranker-v2-base-multilingual",
-                "query": question,
-                "documents": [p["text"] for p in payloads],
-                "top_n": len(payloads),
-            },
-            timeout=30,
-        )
-        resp.raise_for_status()
-        ranked: list[dict] = []
-        for item in resp.json().get("results", []):
-            idx = item["index"]
-            if 0 <= idx < len(payloads):
-                ranked.append(payloads[idx])
-        return ranked
-

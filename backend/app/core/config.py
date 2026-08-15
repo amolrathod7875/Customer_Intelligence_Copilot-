@@ -39,11 +39,11 @@ class Settings:
     qdrant_manifest_collection: str
     qdrant_dense_model: str
     qdrant_sparse_model: str
+    qdrant_late_interaction_model: str
     qdrant_dim: int
+    qdrant_multi_dim: int
     chunk_size: int
     chunk_overlap: int
-    reranker: str
-    jina_api_key: str | None
     retrieve_limit: int
 
     @classmethod
@@ -61,10 +61,12 @@ class Settings:
             qdrant_manifest_collection=getenv("QDRANT_MANIFEST_COLLECTION", "customer_manifest"),
             qdrant_dense_model=getenv("QDRANT_DENSE_MODEL", "sentence-transformers/all-MiniLM-L6-v2"),
             qdrant_sparse_model=getenv("QDRANT_SPARSE_MODEL", "Qdrant/bm25"),
+            qdrant_late_interaction_model=getenv(
+                "QDRANT_LATE_INTERACTION_MODEL", "answerdotai/answerai-colbert-small-v1"
+            ),
             qdrant_dim=int(getenv("QDRANT_DIM", "384")),
+            qdrant_multi_dim=int(getenv("QDRANT_MULTI_DIM", "96")),
             chunk_size=int(getenv("CHUNK_SIZE", "800")),
             chunk_overlap=int(getenv("CHUNK_OVERLAP", "150")),
-            reranker=getenv("RERANKER", "jina").lower(),
-            jina_api_key=getenv("JINA_API_KEY") or None,
             retrieve_limit=int(getenv("RETRIEVE_LIMIT", "30")),
         )
