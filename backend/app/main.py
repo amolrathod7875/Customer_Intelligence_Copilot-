@@ -22,10 +22,10 @@ def create_app() -> FastAPI:
     settings = Settings.from_environment()
     app = FastAPI(title="Customer Intelligence Copilot", lifespan=lifespan)
 
-    # CORS restricted to the configured frontend dev origin (no wildcard).
+    # CORS restricted to local dev origins (localhost / 127.0.0.1, any port).
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[settings.frontend_origin],
+        allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

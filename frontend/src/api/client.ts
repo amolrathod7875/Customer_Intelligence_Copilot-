@@ -1,6 +1,9 @@
-import type { ChatResponse, SyncSummary } from "@/types";
+﻿import type { ChatResponse, SyncSummary } from "@/types";
 
-export const USE_MOCK_API = true;
+export const USE_MOCK_API = import.meta.env.VITE_USE_MOCK_API === "true";
+
+// Base URL of the FastAPI backend. Override with VITE_API_BASE if hosted elsewhere.
+export const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -13,7 +16,7 @@ export const initialMockAnswer: ChatResponse = {
     {
       id: "fr-018",
       source_type: "customer_record",
-      title: "Feature request FR-018 · SkyGrid Systems",
+      title: "Feature request FR-018 Â· SkyGrid Systems",
       excerpt:
         "Requested offline mission synchronization for low-connectivity operational environments.",
       url: null,
@@ -22,7 +25,7 @@ export const initialMockAnswer: ChatResponse = {
     {
       id: "note-221",
       source_type: "customer_record",
-      title: "Meeting note · SkyGrid Systems",
+      title: "Meeting note Â· SkyGrid Systems",
       excerpt:
         "Team asked whether mission updates could continue while a device is temporarily offline.",
       url: null,
@@ -58,7 +61,7 @@ const customerOnlyMock: ChatResponse = {
     {
       id: "bug-402",
       source_type: "customer_record",
-      title: "Bug BUG-402 · SkyGrid Systems",
+      title: "Bug BUG-402 Â· SkyGrid Systems",
       excerpt:
         "Mission upload retries intermittently fail when the device reconnects after a long outage.",
       url: null,
@@ -67,7 +70,7 @@ const customerOnlyMock: ChatResponse = {
     {
       id: "task-119",
       source_type: "customer_record",
-      title: "Task TASK-119 · SkyGrid Systems",
+      title: "Task TASK-119 Â· SkyGrid Systems",
       excerpt:
         "Review the offline synchronization workflow with the account owner before the next quarterly check-in.",
       url: null,
@@ -94,7 +97,7 @@ const documentationMock: ChatResponse = {
     {
       id: "release-2026-03",
       source_type: "release_note",
-      title: "Release notes · March 2026",
+      title: "Release notes Â· March 2026",
       excerpt:
         "Improvements to mission scheduling and synchronization reliability for intermittent connectivity.",
       url: "https://docs.flytbase.com/release-notes",
@@ -121,7 +124,7 @@ export async function askQuestion(question: string): Promise<ChatResponse> {
     return pickMock(question);
   }
 
-  const response = await fetch("/api/chat", {
+  const response = await fetch(`${API_BASE}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ question }),
@@ -143,7 +146,7 @@ export async function syncCorpus(): Promise<SyncSummary> {
     };
   }
 
-  const response = await fetch("/api/corpus/sync", { method: "POST" });
+  const response = await fetch(`${API_BASE}/api/corpus/sync`, { method: "POST" });
   if (!response.ok) throw new Error("Corpus sync failed. Please try again.");
   return response.json();
 }
