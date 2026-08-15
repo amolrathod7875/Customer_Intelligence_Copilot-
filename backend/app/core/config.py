@@ -1,6 +1,26 @@
+﻿import os
 from dataclasses import dataclass
 from os import getenv
 from pathlib import Path
+
+
+def _load_env_files() -> None:
+    """Best-effort ``.env`` loading without requiring python-dotenv."""
+    backend_dir = Path(__file__).resolve().parent.parent
+    for path in (backend_dir / ".env", backend_dir.parent / ".env"):
+        if not path.exists():
+            continue
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key, value = key.strip(), value.strip().strip('"').strip("'")
+            if key:
+                os.environ.setdefault(key, value)
+
+
+_load_env_files()
 
 
 @dataclass(frozen=True)
