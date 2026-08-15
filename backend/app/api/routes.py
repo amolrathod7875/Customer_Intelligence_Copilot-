@@ -18,6 +18,7 @@ from app.services.corpus_sync import CorpusSync
 from app.services.customer_retriever import CustomerRetriever
 from app.services.flytbase_web import FlytBaseWebRetriever
 from app.services.llm_client import LlmClient, OpenAILlmClient
+from app.services.qdrant_store import QdrantVectorStore
 from app.services.query_router import EvidenceRoute, route_question
 from app.services.vector_store import InMemoryVectorStore, VectorStore
 
@@ -35,7 +36,9 @@ class Container:
 
 
 def build_container(settings: Settings) -> Container:
-    store: VectorStore = InMemoryVectorStore()
+    store: VectorStore = (
+        QdrantVectorStore(settings) if settings.qdrant_url else InMemoryVectorStore()
+    )
     corpus_sync = CorpusSync(store=store)
     customer_retriever = CustomerRetriever(store=store)
     web_retriever = FlytBaseWebRetriever()
