@@ -7,6 +7,7 @@ our existing FastAPI API onto Gradio's underlying FastAPI app, so every
 """
 
 import os
+import threading
 import gradio as gr
 
 from app.api.routes import build_container, router
@@ -24,15 +25,22 @@ def _resolve_corpus_dir() -> None:
             return
 
 
+def _index_corpus(container, corpus_dir) -> None:
+    try:
+        container.corpus_sync.sync(corpus_dir)
+    except Exception as exc:  # Don't hard-crash the Space if indexing fails.
+        print(f"[startup] corpus sync failed: {exc}")
+
+
 def _bootstrap() -> object:
-    """Build the service container and index the corpus (best effort)."""
+    """Build the service container and index the corpus in the background."""
     _resolve_corpus_dir()
     settings = Settings.from_environment()
     container = build_container(settings)
-    try:
-        container.corpus_sync.sync(settings.corpus_dir)
-    except Exception as exc:  # Don't hard-crash the Space if the corpus is absent.
-        print(f"[startup] corpus sync skipped: {exc}")
+    # Background the slow Qdrant Cloud Inference sync so the app boots fast.
+    threading.Thread(
+        target=_index_corpus, args=(container, settings.corpus_dir), daemon=True
+    ).start()
     return container
 
 

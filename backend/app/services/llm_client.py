@@ -35,7 +35,12 @@ class OpenAILlmClient:
         else:
             from openai import OpenAI
 
-            self._client = OpenAI(base_url=base_url, api_key=api_key or "missing")
+            self._client = OpenAI(
+                base_url=base_url,
+                api_key=api_key or "missing",
+                timeout=60,
+                max_retries=1,
+            )
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "OpenAILlmClient":
